@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Drag Test</title>
+    <style>
+        #dropZone {
+            width: 300px;
+            height: 200px;
+            border: 2px dashed #ccc;
+            text-align: center;
+            padding: 20px;
+            margin: 20px;
+        }
+        #dropZone.dragover {
+            border-color: blue;
+            background-color: lightblue;
+        }
+    </style>
+</head>
+<body>
+    <h1>Simple Drag and Drop Test</h1>
+    <div id="dropZone">
+        <p>Drag a file here</p>
+        <p id="status">No file dropped</p>
+    </div>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const status = document.getElementById('status');
+
+        // Prevent default drag behaviors
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        // Highlight drop zone when item is dragged over it
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, highlight, false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, unhighlight, false);
+        });
+
+        function highlight(e) {
+            dropZone.classList.add('dragover');
+            console.log('Highlight');
+        }
+
+        function unhighlight(e) {
+            dropZone.classList.remove('dragover');
+            console.log('Unhighlight');
+        }
+
+        // Handle dropped files
+        dropZone.addEventListener('drop', handleDrop, false);
+
+        function handleDrop(e) {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            
+            console.log('Drop detected');
+            console.log('Files:', files.length);
+            
+            if (files.length > 0) {
+                const file = files[0];
+                status.textContent = `File: ${file.name} (${file.size} bytes)`;
+                console.log('File:', file.name, file.size, file.type);
+            }
+        }
+    </script>
+</body>
+</html>
