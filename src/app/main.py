@@ -26,7 +26,7 @@ app.add_middleware(
 )
 
 # Mount static files
-app.mount("/static", StaticFiles(directory="src/app/static"), name="static")
+app.mount("/static", StaticFiles(directory="src/app/static", check_dir=False), name="static")
 
 # Include routers
 app.include_router(resume_router)

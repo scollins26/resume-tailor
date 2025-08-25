@@ -252,10 +252,16 @@
         </div>
     </footer>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=2"></script>
     <script>
         // Direct drag and drop implementation
         document.addEventListener('DOMContentLoaded', function() {
+            // Give the main script time to initialize
+            setTimeout(() => {
+                console.log('Main script functions available:');
+                console.log('window.analyzeResume:', typeof window.analyzeResume === 'function');
+                console.log('window.handleFile:', typeof window.handleFile === 'function');
+            }, 500);
             const dropZone = document.getElementById('dropZone');
             const dragIndicator = document.getElementById('dragIndicator');
             
@@ -332,9 +338,9 @@
                         });
                         
                         // Try to call handleFile, with fallback if not available
-                        if (typeof handleFile === 'function') {
+                        if (typeof window.handleFile === 'function') {
                             console.log('Calling handleFile function...');
-                            handleFile(file);
+                            window.handleFile(file);
                         } else {
                             console.log('handleFile function not available, using fallback...');
                             // Fallback: directly update the UI
@@ -388,6 +394,18 @@
                         }
                         
                         console.log('Button state updated after file selection - disabled:', analyzeBtn.disabled);
+                        
+                        // Add event listener to job description for real-time button updates
+                        jobDescription.addEventListener('input', () => {
+                            const hasJobDesc = jobDescription.value.trim().length > 0;
+                            analyzeBtn.disabled = !hasJobDesc;
+                            
+                            if (analyzeBtn.disabled) {
+                                analyzeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                            } else {
+                                analyzeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                            }
+                        });
                     }
                     
                     console.log('Fallback: File selected successfully:', file.name);
@@ -470,7 +488,7 @@
                     
                     // Enable/disable button based on form state
                     function updateAnalyzeButton() {
-                        const hasFile = selectedFile !== null;
+                        const hasFile = window.selectedFile !== null;
                         const hasJobDescription = jobDescription && jobDescription.value.trim().length > 0;
                         
                         analyzeBtn.disabled = !(hasFile && hasJobDescription);
@@ -487,19 +505,24 @@
                     // Add event listeners
                     if (jobDescription) {
                         jobDescription.addEventListener('input', updateAnalyzeButton);
+                        console.log('Job description event listener added');
+                        
+                        // Check initial state
+                        console.log('Initial job description length:', jobDescription.value.trim().length);
+                        updateAnalyzeButton();
                     }
                     
                     analyzeBtn.addEventListener('click', (e) => {
                         console.log('Analyze button clicked!');
                         e.preventDefault();
                         
-                        if (!selectedFile || !jobDescription.value.trim()) {
+                        if (!window.selectedFile || !jobDescription.value.trim()) {
                             alert('Please select a file and enter a job description.');
                             return;
                         }
                         
                         console.log('Starting analysis...');
-                        console.log('File:', selectedFile.name);
+                        console.log('File:', window.selectedFile.name);
                         console.log('Job description:', jobDescription.value.trim());
                         
                         // Call the analyze function
@@ -519,6 +542,11 @@
                 
                 // Global variable for selected file
                 window.selectedFile = null;
+                
+                // Make selectedFile available to the embedded script
+                if (typeof window.selectedFile === 'undefined') {
+                    window.selectedFile = null;
+                }
                 
                 // Check if main script functions are available
                 setTimeout(() => {

@@ -1,9 +1,9 @@
 // Global variables
 let selectedFile = null;
-let analysisResults = null;
+let globalAnalysisResults = null;
 
 // DOM elements - will be initialized after DOM loads
-let dropZone, fileInput, dragIndicator, jobDescription, targetRole, industry, experienceLevel, analyzeBtn, resultsSection, loadingState, analysisResults;
+let dropZone, fileInput, dragIndicator, jobDescription, targetRole, industry, experienceLevel, analyzeBtn, resultsSection, loadingState;
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', function() {
@@ -264,7 +264,7 @@ function showResults(data) {
     analysisResults.classList.remove('hidden');
     
     // Store results globally
-    window.analysisResults = data;
+    window.globalAnalysisResults = data;
     
     // Update summary
     document.getElementById('confidenceScore').textContent = `${(data.confidence_score * 100).toFixed(1)}%`;
@@ -349,9 +349,9 @@ function switchTab(e) {
 }
 
 function downloadTailoredResume() {
-    if (!window.analysisResults) return;
+    if (!window.globalAnalysisResults) return;
     
-    const content = window.analysisResults.tailored_resume;
+    const content = window.globalAnalysisResults.tailored_resume;
     const blob = new Blob([content], { type: 'text/plain' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
