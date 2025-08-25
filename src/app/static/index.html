@@ -364,6 +364,9 @@
                         return;
                     }
 
+                    // Set global selected file
+                    window.selectedFile = file;
+                    
                     // Update the drop zone to show selected file
                     dropZone.innerHTML = `
                         <i class="fas fa-file-alt text-4xl text-green-500 mb-4"></i>
@@ -371,12 +374,151 @@
                         <p class="text-sm text-gray-500">Click to change file</p>
                     `;
                     
+                    // Update analyze button state
+                    const analyzeBtn = document.getElementById('analyzeBtn');
+                    const jobDescription = document.getElementById('jobDescription');
+                    if (analyzeBtn && jobDescription) {
+                        const hasJobDescription = jobDescription.value.trim().length > 0;
+                        analyzeBtn.disabled = !hasJobDescription;
+                        
+                        if (analyzeBtn.disabled) {
+                            analyzeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                        } else {
+                            analyzeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                        }
+                        
+                        console.log('Button state updated after file selection - disabled:', analyzeBtn.disabled);
+                    }
+                    
                     console.log('Fallback: File selected successfully:', file.name);
+                }
+                
+                // Fallback analyze function
+                async function fallbackAnalyzeResume() {
+                    console.log('Fallback: Starting resume analysis...');
+                    
+                    if (!window.selectedFile || !jobDescription.value.trim()) {
+                        alert('Please select a file and enter a job description.');
+                        return;
+                    }
+                    
+                    // Show loading state
+                    const resultsSection = document.getElementById('resultsSection');
+                    const loadingState = document.getElementById('loadingState');
+                    if (resultsSection && loadingState) {
+                        resultsSection.classList.remove('hidden');
+                        loadingState.classList.remove('hidden');
+                    }
+                    
+                    try {
+                        const formData = new FormData();
+                        formData.append('resume_file', window.selectedFile);
+                        formData.append('job_description', jobDescription.value.trim());
+                        
+                        console.log('Sending request to /resume/analyze-file');
+                        
+                        const response = await fetch('/resume/analyze-file', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        console.log('Response status:', response.status);
+                        
+                        if (!response.ok) {
+                            const errorText = await response.text();
+                            console.error('Response error:', errorText);
+                            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                        }
+                        
+                        const result = await response.json();
+                        console.log('Analysis result:', result);
+                        
+                        // Show results
+                        if (loadingState) loadingState.classList.add('hidden');
+                        const analysisResults = document.getElementById('analysisResults');
+                        if (analysisResults) {
+                            analysisResults.classList.remove('hidden');
+                            
+                            // Update summary
+                            document.getElementById('confidenceScore').textContent = `${(result.confidence_score * 100).toFixed(1)}%`;
+                            document.getElementById('keywordsFound').textContent = Object.keys(result.keyword_matches).length;
+                            document.getElementById('missingKeywords').textContent = result.missing_keywords.length;
+                            document.getElementById('suggestionsCount').textContent = result.suggestions.length;
+                            
+                            // Update tailored resume
+                            document.getElementById('tailoredResume').textContent = result.tailored_resume;
+                        }
+                        
+                    } catch (error) {
+                        console.error('Error analyzing resume:', error);
+                        alert('An error occurred while analyzing your resume. Please try again.');
+                        
+                        if (loadingState) loadingState.classList.add('hidden');
+                    }
                 }
 
 
                 
                 console.log('Direct drag and drop setup complete');
+                
+                // Set up analyze button functionality
+                const analyzeBtn = document.getElementById('analyzeBtn');
+                const jobDescription = document.getElementById('jobDescription');
+                
+                if (analyzeBtn) {
+                    console.log('Setting up analyze button...');
+                    
+                    // Enable/disable button based on form state
+                    function updateAnalyzeButton() {
+                        const hasFile = selectedFile !== null;
+                        const hasJobDescription = jobDescription && jobDescription.value.trim().length > 0;
+                        
+                        analyzeBtn.disabled = !(hasFile && hasJobDescription);
+                        
+                        if (analyzeBtn.disabled) {
+                            analyzeBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                        } else {
+                            analyzeBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                        }
+                        
+                        console.log('Button state updated - hasFile:', hasFile, 'hasJobDescription:', hasJobDescription, 'disabled:', analyzeBtn.disabled);
+                    }
+                    
+                    // Add event listeners
+                    if (jobDescription) {
+                        jobDescription.addEventListener('input', updateAnalyzeButton);
+                    }
+                    
+                    analyzeBtn.addEventListener('click', (e) => {
+                        console.log('Analyze button clicked!');
+                        e.preventDefault();
+                        
+                        if (!selectedFile || !jobDescription.value.trim()) {
+                            alert('Please select a file and enter a job description.');
+                            return;
+                        }
+                        
+                        console.log('Starting analysis...');
+                        console.log('File:', selectedFile.name);
+                        console.log('Job description:', jobDescription.value.trim());
+                        
+                        // Call the analyze function
+                        if (typeof window.analyzeResume === 'function') {
+                            console.log('Using main analyzeResume function');
+                            window.analyzeResume();
+                        } else {
+                            console.log('analyzeResume function not available, using fallback...');
+                            fallbackAnalyzeResume();
+                        }
+                    });
+                    
+                    // Initial button state
+                    updateAnalyzeButton();
+                    console.log('Analyze button setup complete');
+                }
+                
+                // Global variable for selected file
+                window.selectedFile = null;
                 
                 // Check if main script functions are available
                 setTimeout(() => {

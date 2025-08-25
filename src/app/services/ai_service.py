@@ -1,7 +1,8 @@
 import os
 import re
+import json
+import requests
 from typing import List, Dict, Tuple, Any
-from openai import OpenAI
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -9,55 +10,132 @@ load_dotenv()
 
 class AIService:
     def __init__(self):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or api_key == "your_openai_api_key_here":
-            self.client = None
-            logger.warning("OpenAI API key not configured. AI features will be disabled.")
+        # Try Ollama first (free, local AI)
+        self.ollama_available = self._check_ollama_connection()
+        
+        if self.ollama_available:
+            logger.info("Ollama client initialized successfully")
+            self.client = "ollama"
         else:
-            try:
-                self.client = OpenAI(api_key=api_key)
-                logger.info("OpenAI client initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize OpenAI client: {e}")
+            # Fallback to OpenAI if available
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key or api_key == "your_openai_api_key_here":
                 self.client = None
-        self.model = "gpt-4-turbo-preview"
+                logger.warning("Neither Ollama nor OpenAI available. AI features will be disabled.")
+            else:
+                try:
+                    from openai import OpenAI
+                    self.client = OpenAI(api_key=api_key)
+                    logger.info("OpenAI client initialized successfully")
+                except Exception as e:
+                    logger.error(f"Failed to initialize OpenAI client: {e}")
+                    self.client = None
+        
+        self.model = "llama2"  # Default to Ollama model
+    
+    def _check_ollama_connection(self) -> bool:
+        """Check if Ollama is running and accessible"""
+        try:
+            response = requests.get("http://localhost:11434/api/tags", timeout=5)
+            return response.status_code == 200
+        except Exception as e:
+            logger.error(f"Ollama connection failed: {e}")
+            return False
     
     def extract_keywords_from_job_description(self, job_description: str) -> List[Dict[str, Any]]:
         """Extract important keywords and skills from job description"""
-        if not self.client:
-            logger.warning("OpenAI client not available. Using fallback keyword extraction.")
+        if self.client == "ollama":
+            return self._extract_keywords_with_ollama(job_description)
+        elif not self.client:
+            logger.warning("No AI client available. Using fallback keyword extraction.")
             return self._fallback_keyword_extraction(job_description)
+        else:
+            # OpenAI client
+            prompt = f"""
+            Analyze the following job description and extract the most important keywords, skills, and requirements.
+            Focus on technical skills, soft skills, tools, technologies, and qualifications.
+            
+            Job Description:
+            {job_description}
+            
+            Return a JSON array with objects containing:
+            - keyword: the keyword/skill
+            - importance: importance score (0-1)
+            - category: "technical", "soft_skill", "tool", "qualification", or "experience"
+            
+            Format as JSON array only.
+            """
+            
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1
+                )
+                
+                keywords_data = json.loads(response.choices[0].message.content)
+                return keywords_data
+                
+            except Exception as e:
+                logger.error(f"Error extracting keywords: {e}")
+                return self._fallback_keyword_extraction(job_description)
+    
+    def _extract_keywords_with_ollama(self, job_description: str) -> List[Dict[str, Any]]:
+        """Extract keywords using Ollama"""
+        system_prompt = """You are an expert at analyzing job descriptions and extracting key skills and requirements. 
+        Return your response as a JSON array with objects containing: keyword, importance (0-1), and category (technical, soft_skill, tool, qualification, or experience).
+        Only return valid JSON, no other text."""
         
         prompt = f"""
-        Analyze the following job description and extract the most important keywords, skills, and requirements.
-        Focus on technical skills, soft skills, tools, technologies, and qualifications.
+        Analyze this job description and extract the most important keywords, skills, and requirements:
         
-        Job Description:
         {job_description}
         
-        Return a JSON array with objects containing:
-        - keyword: the keyword/skill
-        - importance: importance score (0-1)
-        - category: "technical", "soft_skill", "tool", "qualification", or "experience"
-        
-        Format as JSON array only.
+        Return as JSON array with objects: [{{"keyword": "skill", "importance": 0.8, "category": "technical"}}]
         """
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
+            response = self._call_ollama(prompt, system_prompt)
+            
+            # Try to extract JSON from response
+            json_match = re.search(r'\[.*\]', response, re.DOTALL)
+            if json_match:
+                keywords_data = json.loads(json_match.group())
+                return keywords_data
+            else:
+                return self._fallback_keyword_extraction(job_description)
+                
+        except Exception as e:
+            logger.error(f"Error extracting keywords with Ollama: {e}")
+            return self._fallback_keyword_extraction(job_description)
+    
+    def _call_ollama(self, prompt: str, system_prompt: str = None) -> str:
+        """Make a call to Ollama API"""
+        try:
+            payload = {
+                "model": self.model,
+                "prompt": prompt,
+                "stream": False
+            }
+            
+            if system_prompt:
+                payload["system"] = system_prompt
+            
+            response = requests.post(
+                "http://localhost:11434/api/generate",
+                json=payload,
+                timeout=30
             )
             
-            # Parse the JSON response
-            import json
-            keywords_data = json.loads(response.choices[0].message.content)
-            return keywords_data
-            
+            if response.status_code == 200:
+                return response.json()["response"]
+            else:
+                logger.error(f"Ollama API error: {response.status_code}")
+                return ""
+                
         except Exception as e:
-            logger.error(f"Error extracting keywords: {e}")
-            return self._fallback_keyword_extraction(job_description)
+            logger.error(f"Error calling Ollama: {e}")
+            return ""
     
     def analyze_resume_keywords(self, resume_text: str, keywords: List[str]) -> Dict[str, Any]:
         """Analyze which keywords are present in the resume"""
@@ -86,13 +164,52 @@ class AIService:
     
     def tailor_resume(self, resume_text: str, job_description: str, target_role: str = None) -> str:
         """Tailor the resume to better match the job description"""
-        if not self.client:
-            logger.warning("OpenAI client not available. Returning original resume.")
+        if self.client == "ollama":
+            return self._tailor_resume_with_ollama(resume_text, job_description, target_role)
+        elif not self.client:
+            logger.warning("No AI client available. Returning original resume.")
             return resume_text
+        else:
+            # OpenAI client
+            prompt = f"""
+            You are an expert resume writer and career coach. Your task is to optimize a resume to better match a specific job description.
+            
+            Job Description:
+            {job_description}
+            
+            Target Role: {target_role or "Not specified"}
+            
+            Original Resume:
+            {resume_text}
+            
+            Please optimize the resume by:
+            1. Incorporating relevant keywords from the job description naturally
+            2. Highlighting relevant experience and skills
+            3. Using action verbs and quantifiable achievements
+            4. Ensuring ATS (Applicant Tracking System) compatibility
+            5. Maintaining professional tone and formatting
+            
+            Return the optimized resume text. Keep the same general structure but enhance the content to better match the job requirements.
+            """
+            
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3
+                )
+                
+                return response.choices[0].message.content.strip()
+                
+            except Exception as e:
+                logger.error(f"Error tailoring resume: {e}")
+                return resume_text
+    
+    def _tailor_resume_with_ollama(self, resume_text: str, job_description: str, target_role: str = None) -> str:
+        """Tailor resume using Ollama"""
+        system_prompt = """You are an expert resume writer. Rewrite the resume to better match the job description while maintaining truthfulness and professional tone."""
         
         prompt = f"""
-        You are an expert resume writer and career coach. Your task is to optimize a resume to better match a specific job description.
-        
         Job Description:
         {job_description}
         
@@ -101,64 +218,113 @@ class AIService:
         Original Resume:
         {resume_text}
         
-        Please optimize the resume by:
-        1. Incorporating relevant keywords from the job description naturally
-        2. Highlighting relevant experience and skills
-        3. Using action verbs and quantifiable achievements
-        4. Ensuring ATS (Applicant Tracking System) compatibility
-        5. Maintaining professional tone and formatting
+        Rewrite this resume to better match the job description. Focus on:
+        1. Highlighting relevant skills and experiences
+        2. Using keywords from the job description
+        3. Emphasizing achievements that align with the role
+        4. Maintaining professional tone and truthfulness
         
-        Return the optimized resume text. Keep the same general structure but enhance the content to better match the job requirements.
+        Return only the rewritten resume text, no explanations.
         """
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
-            )
-            
-            return response.choices[0].message.content.strip()
-            
+            tailored_resume = self._call_ollama(prompt, system_prompt)
+            if tailored_resume and len(tailored_resume) > 100:
+                return tailored_resume
+            else:
+                return resume_text
         except Exception as e:
-            logger.error(f"Error tailoring resume: {e}")
+            logger.error(f"Error tailoring resume with Ollama: {e}")
             return resume_text
     
     def generate_improvement_suggestions(self, resume_text: str, job_description: str, keyword_analysis: Dict[str, Any]) -> List[str]:
         """Generate specific suggestions for resume improvement"""
-        if not self.client:
-            logger.warning("OpenAI client not available. Using fallback suggestions.")
+        if self.client == "ollama":
+            return self._generate_suggestions_with_ollama(resume_text, job_description, keyword_analysis)
+        elif not self.client:
+            logger.warning("No AI client available. Using fallback suggestions.")
             return self._fallback_suggestions(resume_text, job_description, keyword_analysis)
+        else:
+            # OpenAI client
+            missing_keywords = [kw for kw, data in keyword_analysis.items() if not data["found"]]
+            
+            prompt = f"""
+            Based on the following information, provide specific, actionable suggestions to improve the resume:
+            
+            Job Description:
+            {job_description}
+            
+            Resume:
+            {resume_text}
+            
+            Missing Keywords: {', '.join(missing_keywords[:10])}
+            
+            Provide 5-7 specific suggestions that would help this resume better match the job requirements.
+            Focus on practical improvements that can be implemented.
+            """
+            
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.4
+                )
+                
+                suggestions = response.choices[0].message.content.strip().split('\n')
+                return [s.strip() for s in suggestions if s.strip()]
+                
+            except Exception as e:
+                logger.error(f"Error generating suggestions: {e}")
+                return self._fallback_suggestions(resume_text, job_description, keyword_analysis)
+    
+    def _generate_suggestions_with_ollama(self, resume_text: str, job_description: str, keyword_analysis: Dict[str, Any]) -> List[str]:
+        """Generate suggestions using Ollama"""
+        system_prompt = """You are a career coach and resume expert. Provide specific, actionable suggestions for improving resumes."""
         
         missing_keywords = [kw for kw, data in keyword_analysis.items() if not data["found"]]
         
         prompt = f"""
-        Based on the following information, provide specific, actionable suggestions to improve the resume:
+        Resume:
+        {resume_text}
         
         Job Description:
         {job_description}
         
-        Resume:
-        {resume_text}
+        Keyword Analysis:
+        {json.dumps(keyword_analysis, indent=2)}
         
-        Missing Keywords: {', '.join(missing_keywords[:10])}
+        Provide 5-7 specific, actionable suggestions to improve this resume for this job. 
+        Focus on:
+        1. Adding missing keywords
+        2. Improving bullet points
+        3. Quantifying achievements
+        4. ATS optimization
+        5. Professional presentation
         
-        Provide 5-7 specific suggestions that would help this resume better match the job requirements.
-        Focus on practical improvements that can be implemented.
+        Return as a numbered list of suggestions.
         """
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.4
-            )
+            suggestions_text = self._call_ollama(prompt, system_prompt)
             
-            suggestions = response.choices[0].message.content.strip().split('\n')
-            return [s.strip() for s in suggestions if s.strip()]
+            # Parse suggestions into a list
+            suggestions = []
+            lines = suggestions_text.split('\n')
+            for line in lines:
+                line = line.strip()
+                if line and (line[0].isdigit() or line.startswith('-') or line.startswith('•')):
+                    # Remove numbering/bullets and clean up
+                    clean_line = re.sub(r'^[\d\-•\.\s]+', '', line).strip()
+                    if clean_line and len(clean_line) > 10:
+                        suggestions.append(clean_line)
             
+            if suggestions:
+                return suggestions[:7]  # Limit to 7 suggestions
+            else:
+                return self._fallback_suggestions(resume_text, job_description, keyword_analysis)
+                
         except Exception as e:
-            logger.error(f"Error generating suggestions: {e}")
+            logger.error(f"Error generating suggestions with Ollama: {e}")
             return self._fallback_suggestions(resume_text, job_description, keyword_analysis)
     
     def calculate_confidence_score(self, keyword_analysis: Dict[str, Any], keywords: List[Dict[str, Any]]) -> float:
@@ -308,33 +474,62 @@ class AIService:
     
     def analyze_resume_sections(self, resume_text: str) -> List[Dict[str, str]]:
         """Analyze and identify different sections of the resume"""
-        if not self.client:
-            logger.warning("OpenAI client not available. Using fallback section analysis.")
+        if self.client == "ollama":
+            return self._analyze_sections_with_ollama(resume_text)
+        elif not self.client:
+            logger.warning("No AI client available. Using fallback section analysis.")
             return self._fallback_section_analysis(resume_text)
+        else:
+            # OpenAI client
+            prompt = f"""
+            Analyze the following resume and identify its main sections. For each section, provide:
+            1. Section name (e.g., "Experience", "Education", "Skills", "Summary")
+            2. The content of that section
+            
+            Resume:
+            {resume_text}
+            
+            Return as JSON array with objects containing "section_name" and "content".
+            """
+            
+            try:
+                response = self.client.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1
+                )
+                
+                sections = json.loads(response.choices[0].message.content)
+                return sections
+                
+            except Exception as e:
+                logger.error(f"Error analyzing resume sections: {e}")
+                return self._fallback_section_analysis(resume_text)
+    
+    def _analyze_sections_with_ollama(self, resume_text: str) -> List[Dict[str, str]]:
+        """Analyze resume sections using Ollama"""
+        system_prompt = """You are an expert resume analyzer. Identify and extract resume sections in JSON format."""
         
         prompt = f"""
-        Analyze the following resume and identify its main sections. For each section, provide:
-        1. Section name (e.g., "Experience", "Education", "Skills", "Summary")
-        2. The content of that section
+        Analyze this resume and identify its main sections:
         
-        Resume:
         {resume_text}
         
         Return as JSON array with objects containing "section_name" and "content".
         """
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1
-            )
+            response = self._call_ollama(prompt, system_prompt)
             
-            import json
-            sections = json.loads(response.choices[0].message.content)
-            return sections
-            
+            # Try to extract JSON
+            json_match = re.search(r'\[.*\]', response, re.DOTALL)
+            if json_match:
+                sections = json.loads(json_match.group())
+                return sections
+            else:
+                return self._fallback_section_analysis(resume_text)
+                
         except Exception as e:
-            logger.error(f"Error analyzing resume sections: {e}")
+            logger.error(f"Error analyzing sections with Ollama: {e}")
             return self._fallback_section_analysis(resume_text)
 

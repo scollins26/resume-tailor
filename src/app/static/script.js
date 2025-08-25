@@ -53,7 +53,11 @@ function setupEventListeners() {
     fileInput.addEventListener('change', updateAnalyzeButton);
 
     // Analyze button
-    analyzeBtn.addEventListener('click', analyzeResume);
+    analyzeBtn.addEventListener('click', (e) => {
+        console.log('Analyze button clicked!');
+        e.preventDefault();
+        analyzeResume();
+    });
 
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -182,7 +186,12 @@ window.updateAnalyzeButton = function() {
 }
 
 // API functions
-async function analyzeResume() {
+// Make analyzeResume globally available
+window.analyzeResume = async function() {
+    console.log('Analyze resume function called');
+    console.log('Selected file:', selectedFile);
+    console.log('Job description:', jobDescription.value.trim());
+    
     if (!selectedFile || !jobDescription.value.trim()) {
         showError('Please select a file and enter a job description.');
         return;
@@ -205,16 +214,28 @@ async function analyzeResume() {
             formData.append('experience_level', experienceLevel.value);
         }
 
+        console.log('Sending request to /resume/analyze-file');
+        console.log('FormData contents:');
+        for (let [key, value] of formData.entries()) {
+            console.log(key, ':', value);
+        }
+
         const response = await fetch('/resume/analyze-file', {
             method: 'POST',
             body: formData
         });
 
+        console.log('Response status:', response.status);
+        console.log('Response headers:', response.headers);
+
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            const errorText = await response.text();
+            console.error('Response error:', errorText);
+            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
         }
 
         const result = await response.json();
+        console.log('Analysis result:', result);
         showResults(result);
         
     } catch (error) {
